@@ -1,0 +1,4 @@
+cd /Users/jim/PycharmProjects/Schwab-API-Python/myTrading/
+/Users/jim/PycharmProjects/Schwab-API-Python/.venv/bin/python /Users/jim/PycharmProjects/Schwab-API-Python/myTrading/schwabTrading.py
+/usr/bin/mail -s "Trade log"  jimhaile@mac.com < /Users/jim/PycharmProjects/Schwab-API-Python/myTrading/trade.log
+/usr/bin/mail -s "Trade Error log"  jimhaile@mac.com < /Users/jim/PycharmProjects/Schwab-API-Python/myTrading/trade_error.log

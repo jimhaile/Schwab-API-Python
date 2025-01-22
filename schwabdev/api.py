@@ -10,7 +10,7 @@ from datetime import datetime
 
 class Client:
 
-    def __init__(self, app_key, app_secret, callback_url="https://127.0.0.1", tokens_file="tokens.json", timeout=5, verbose=True, show_linked=True):
+    def __init__(self, app_key, app_secret, callback_url="https://127.0.0.1", tokens_file="tokens.json", timeout=5, verbose=False, show_linked=True):
         """
         Initialize a client to access the Schwab API.
         :param app_key: app key credentials
