@@ -19,8 +19,8 @@ URL = "https://gandalf.gammawizard.com/var2/"
 LOGIN_USERNAME_FIELD = '/html/body/app-root/app-bouncer/app-login/mat-card/mat-card-content/form/p[1]/mat-form-field/div/div[1]/div/input'
 LOGIN_PASSWORD_FIELD = '/html/body/app-root/app-bouncer/app-login/mat-card/mat-card-content/form/p[2]/mat-form-field/div/div[1]/div/input'
 LOGIN_BUTTON = '/html/body/app-root/app-bouncer/app-login/mat-card/mat-card-content/form/p[3]/button'
-USERNAME = 'jimhaile@mac.com'
-PASSWORD = 'EWTXCAL1BER'
+USERNAME = xxxxxxxx
+PASSWORD = xxxxxxxx
 
 options = Options()
 options.add_argument('headless')
