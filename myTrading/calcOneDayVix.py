@@ -7,6 +7,7 @@ import math
 import json
 import csv
 import pandas as pd
+from getDollarSpreads import getDollarSpreads
 
 useTestFile = False
 
@@ -66,6 +67,9 @@ def main():
     SPX = (client.quote("$SPX").json())
     VIX = (client.quote("$VIX").json())
     rate = IRXPrice['$IRX']['quote']['lastPrice']/1000
+    tdate = datetime.now().strftime("%Y-%m-%d")
+    exp = next_business_day().strftime("%Y-%m-%d")
+
 
     #print(f"Risk Free Rate: {risk_free_rate}")
     SPXQuote = f"SPX: {SPX['$SPX']['quote']['lastPrice']:.2f}"
@@ -232,16 +236,29 @@ def main():
     #print(VIXOne)
     #print(SPX['$SPX']['quote']['lastPrice'])
     #print(F)
+    putStrike, callStrike, callSpreadPrice, putSpreadPrice = getDollarSpreads()
+
     result = {
         "time": datetime.now().strftime('%H:%M:%S'),
-        "VIX": VIX['$VIX']['quote']['lastPrice'],
-        "VIXOne": VIXOne,
-        "SPX": SPX['$SPX']['quote']['lastPrice'],
-        "Forward": F
+        "tdate": tdate,
+        "exp": exp,
+        "VIX": format(VIX['$VIX']['quote']['lastPrice'],".2f"),
+        "VIXOne": format(VIXOne,".2f"),
+        "SPX": format(SPX['$SPX']['quote']['lastPrice'],".2f"),
+        "Forward": format(F,".2f"),
+        "putStrike": putStrike,
+        "callStrike": callStrike,
+        "callSpreadPrice": callSpreadPrice,
+        "putSpreadPrice": putSpreadPrice
     }
     #print(result)
     # Print it as a single JSON line. Make sure no other prints occur.
     print(json.dumps(result))
+    filename = "/Users/jim/PycharmProjects/Schwab-API-Python/myTrading/VixOne.json"
+    with open(filename, "w") as f:
+        json.dump(result, f, indent=2)
+
+
     #print(f"{datetime.now().strftime('%H:%M:%S')} {str(VIXQuote)} {str(f'VIX One: {VIXOne:.2f}')} {str(SPXQuote)} {str(f'Forward : {F:.2f}')}")
 
 if __name__ == '__main__':

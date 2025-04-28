@@ -9,6 +9,12 @@ import json
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', 500)
 
+def safe_float(value, default=0.0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
 def sign(x):
     if x > 0:
         return 1
@@ -16,11 +22,12 @@ def sign(x):
         return -1
     else:
         return 0
+
 def getVIXOne():
     """
-    Runs calcOneDayVix.py and returns (VIX, VIXOne, SPX, Forward).
-    If the subprocess output is invalid JSON or missing fields,
-    set them to empty (or None) by default.
+    Runs calcOneDayVix.py and returns (VIX, VIXOne, SPX, Forward) as strings.
+    If there's any error (empty output or JSON parse error),
+    return four empty strings.
     """
     result = subprocess.run(
         [
@@ -32,38 +39,41 @@ def getVIXOne():
         text=True
     )
 
-    # Strip out trailing newlines
     output_string = result.stdout.strip()
     #print(output_string)
-    # Default values if parsing fails or keys are missing
-    VIX = ""
-    VIXOne = ""
-    SPX = ""
-    Forward = ""
+
+
+    if not output_string:
+        print("Could not decode JSON from calcOneDayVix.py. Output was empty!")
+        return "", "", "", ""
 
     try:
-
         data = json.loads(output_string)
+    except json.JSONDecodeError as e:
+        print(f"Could not decode JSON from calcOneDayVix.py. Output was:\n{repr(output_string)}")
+        return "", "", "", ""
 
-        # Safely extract values using .get()
-        VIX = data.get("VIX", "")
+    # Default values
+    VIX = data.get("VIX", "")
+    VIXOne_val = data.get("VIXOne", 0.0)
 
-        VIXOne = "{:.2f}".format(data.get("VIXOne", ""))
-        SPX = data.get("SPX", 0.0)
-        Forward = "{:.2f}".format(data.get("Forward", 0.0))
+    SPX = data.get("SPX", 0.0)
+    Forward_val = data.get("Forward", 0.0)
 
-    except json.JSONDecodeError:
-        # If we can't parse JSON, log or handle the error as needed
-        print("Could not decode JSON from calcOneDayVix.py. Output was:")
-        print(repr(output_string))
+    # Convert to strings as needed
+    #VIXOne_str = "{:.2f}".format(VIXOne_val) if isinstance(VIXOne_val, (int, float)) else ""
+    VIXOne_str = VIXOne_val
 
-    return VIX, VIXOne, SPX, Forward
+    #Forward_str = "{:.2f}".format(Forward_val) if isinstance(Forward_val, (int, float)) else ""
+    Forward_str = Forward_val
+    return VIX, VIXOne_val, SPX, Forward_val
+    #Fix this later
 
 def getUltraPlusNP():
-    #print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     today = date.today()
-    #url = 'https://gandalf.gammawizard.com/rapi/GetUltraNP'
-    url = 'https://gandalf.gammawizard.com/rapi/GetUltraPureConstantExperimental'
+    # url = 'https://gandalf.gammawizard.com/rapi/GetUltraNP'
+    #url = 'https://gandalf.gammawizard.com/rapi/GetUltraPureConstantStable'
+    url = 'https://gandalf.gammawizard.com/rapi/GetUltraPureConstantStableTuned'
     f = open('/Users/jim/PycharmProjects/Schwab-API-Python/myTrading/gandalf_token.txt', 'r')
     bearer = f.read()
     headers = {'Authorization': bearer}
@@ -74,45 +84,25 @@ def getUltraPlusNP():
     while True:
         try:
             UltraPlusNP = requests.get(url, headers=headers)
-
-            # if this point is reached everything worked fine, so exit loop
+            # If we reach here, the request succeeded
             break
-        except:
-            print("Try number: ", tries)
-            tries = tries + 1
+        except requests.exceptions.RequestException as e:  # (Fix #3: more specific exception)
+            print(f"Try number: {tries}, request error: {e}")
+            tries += 1
             if tries >= retries:
                 print("Maximum retries hit")
-                #cmd = '/Users/jim/getGandalf'
-                #os.system(cmd)
-                get_gandalf_token.login()
-                get_gandalf_token.get_token()
-                get_gandalf_token.driver.close()
+                # If you have a routine to refresh tokens, call it here
+                # get_gandalf_token.login()
+                # get_gandalf_token.get_token()
+                # get_gandalf_token.driver.close()
                 exit()
-
             time.sleep(10)
 
     try:
         z = UltraPlusNP.json()
-
-        # trade_info = z['Trade'][0]
-        # tdate = trade_info['Date']
-        #
-        # # Collecting the desired fields for Trade
-        # where = "TradeFields"
-        # trade_fields = {
-        #     'tdate': trade_info['Date'],
-        #     'exp': trade_info['TDate'],
-        #     'putStrike': trade_info['Limit'],
-        #     'callStrike': trade_info['CLimit'],
-        #     'putSpreadPrice': trade_info['Put'],
-        #     'callSpreadPrice': trade_info['Call'],
-        #     'leftGo': trade_info['LeftGo'],
-        #     'rightGo': trade_info['RightGo']
-        # }
-
+        #print(z)
         if "Trade" in z and len(z["Trade"]) > 0:
             trade_info = z["Trade"][0]
-            # Continue as normal
             trade_fields = {
                 "tdate": trade_info["Date"],
                 "exp": trade_info["TDate"],
@@ -124,59 +114,26 @@ def getUltraPlusNP():
                 "rightGo": trade_info["RightGo"],
             }
         else:
-            # Handle the case of no Trade data
             trade_fields = {}
             print("No 'Trade' data found in the API response!")
+            return  # Stop execution here or handle it as needed.
+
         df = pd.DataFrame([trade_fields])
-
-
-
         now = datetime.now()
-
-        #d = (now.strftime("%Y-%m-%d %H:%M:%S"))
         d = (now.strftime("%H:%M:%S"))
-        #tdate = z['Date']
-        #tdate = trade_fields['tdate']
 
-
-        #exp = trade_fields['exp']
-
-        where = "putStrike"
         putStrike = trade_fields['putStrike']
-        where = "callStrike"
         callStrike = trade_fields['callStrike']
-        #print(callStrike)
-
-        where = "putSpreadPrice"
         putSpreadPrice = trade_fields['putSpreadPrice']
-        #print(putSpreadPrice)
-        where = "callSpreadPrice"
         callSpreadPrice = trade_fields['callSpreadPrice']
-        #print(callSpreadPrice)
+        leftGo_val = float(trade_fields['leftGo'])
+        rightGo_val = float(trade_fields['rightGo'])
 
-        #leftGo = "{:.2f}".format(trade_fields['leftGo'])
-        where = "leftGo"
-        leftGo = float(trade_fields['leftGo'])
-        where = "RightGo"
-        rightGo = float(trade_fields['rightGo'])
-
-        #print(leftGo)
-        #print(rightGo)
-
-        # df = pd.DataFrame({'date': [tdate],
-        #                    'exp': [exp],
-        #                    'putStrike': [putStrike],
-        #                    'callStrike': [callStrike],
-        #                    'putSpreadPrice': [putSpreadPrice],
-        #                    'callSpreadPrice': [callSpreadPrice],
-        #                    'leftGo': [leftGo],
-        #                    'rightGo': [rightGo]
-        #                    })
-        where = "if"
-        if sign(leftGo) == sign(rightGo):
+        # Determine trade type and price
+        if sign(leftGo_val) == sign(rightGo_val):
             trade = "Condor"
-            price = sign(leftGo) * putSpreadPrice + sign(rightGo) * callSpreadPrice
-            if leftGo < 0:
+            price = sign(leftGo_val) * putSpreadPrice + sign(rightGo_val) * callSpreadPrice
+            if leftGo_val < 0:
                 BS = "Short"
                 color = 'yellow'
             else:
@@ -184,7 +141,7 @@ def getUltraPlusNP():
                 color = 'blue'
         else:
             trade = "Combo "
-            if leftGo < 0:
+            if leftGo_val < 0:
                 BS = "Long "
                 price = callSpreadPrice - putSpreadPrice
                 color = 'green'
@@ -192,50 +149,46 @@ def getUltraPlusNP():
                 BS = "Short"
                 price = putSpreadPrice - callSpreadPrice
                 color = 'red'
+
         if price < 0:
             DC = "Credit"
+        elif price == 0:
+            DC = "Even  "
         else:
-            if price == 0:
-                DC = "Even  "
-            else:
-                DC = "Debit "
+            DC = "Debit "
 
         price = abs(price)
-        #print(price)
-        where = "getVixOne call"
-        VIX, VIXOne,SPX,Forward = getVIXOne()
-        #print(VIX)
-        where = "formatting"
 
-        diff = "{:.2f}".format(float(Forward) - float(SPX))
-        leftGo = "{:.2f}".format(float(trade_fields['leftGo']))
-        rightGo = "{:.2f}".format(float(trade_fields['rightGo']))
-        #print(VIX, VIXOne,SPX,Forward)
-        #output = (
-        #    f"{datetime.now().strftime('%H:%M:%S')} {BS} {trade} {putStrike} {callStrike} {price:.2f} "
-        #    f"{DC} {VIX} {VIXOne} {SPX} {Forward} {diff} {leftGo} {rightGo}"
-        #)
-        where = "output"
-        output = (f"{datetime.now().strftime('%H:%M:%S')} {str(BS)} {str(trade)} {str(putStrike)} {str(callStrike)} {float(price):.2f}  "
-                  f"{str(DC)} {str(VIX)} {str(VIXOne)}  {str(SPX)} {str(Forward)} {str(diff)} {str(leftGo)} {str(rightGo)}")
+        # Get VIX, VIXOne, SPX, Forward
+        VIX, VIXOne, SPX, Forward = getVIXOne()
+
+        fForward = safe_float(Forward, 0.0)
+        fSPX = safe_float(SPX, 0.0)
+        diff = "{:.2f}".format(fForward - fSPX)
+
+        leftGo = "{:.2f}".format(leftGo_val)
+        rightGo = "{:.2f}".format(rightGo_val)
+
+        output = (
+            f"{datetime.now().strftime('%H:%M:%S')} {BS} {trade} {putStrike} {callStrike} "
+            f"{float(price):.2f}  {DC} {VIX} {VIXOne} {SPX} {Forward} {diff} {leftGo} {rightGo}"
+        )
+        file_path = "/Users/jim/npmonitor.txt"
+
+        with open(file_path, "a") as f:
+            f.write(output + "\n")
+
         colored_output = colored(output, color)
-        where = "if"
-        if((abs(float(trade_fields['leftGo'])) > 0.25) and abs(float(trade_fields['rightGo'])) > 0.25):
+
+        if (abs(leftGo_val) > 0.25) and (abs(rightGo_val) > 0.25):
             print(colored_output)
             df.to_csv('/Users/jim/PycharmProjects/Schwab-API-Python/myTrading/UltraPlusNP.csv', index=False)
 
-
-    #    cmd = '/usr/local/mysql/bin/mysql -h localhost -u root -p --password=Xcal1ber < /Users/jim/NAS10.sql'
-    #    os.system(cmd)
-
     except Exception as e:
         print(f"Exception parsing UltraPlusNP: {e}")
-        print(where)
+        # Optionally log 'where' or 'trade_info' if needed
         print(trade_info)
         time.sleep(15)
-
-
-
 
 def run_function_between_times(start_time, end_time, interval_seconds):
     while True:
@@ -251,10 +204,7 @@ def run_function_between_times(start_time, end_time, interval_seconds):
         time.sleep(interval_seconds)
 
 if __name__ == "__main__":
-    # Define start and end times
     start_time = dt_time(6, 30)  # 6:30 AM
-    end_time = dt_time(13, 25)   # 1:15 PM
-
-    # Run the function every 15 seconds
+    end_time = dt_time(15, 25)   # 1:25 PM
     interval_seconds = 15
     run_function_between_times(start_time, end_time, interval_seconds)

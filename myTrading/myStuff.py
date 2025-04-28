@@ -214,86 +214,95 @@ def round_to_nearest_nickel(amount):
     rounded_amount = round(amount * 20) / 20.0
     return rounded_amount
 
-def getUltraPlusNP():
-    today = date.today()
-    url = 'https://gandalf.gammawizard.com/rapi/GetUltraPureConstantExperimental'
-    f = open('/Users/jim/PycharmProjects/Schwab-API-Python/myTrading/gandalf_token.txt', 'r')
-    bearer = f.read()
-    #(bearer)
+import requests
+import time
+import pandas as pd
+from datetime import date, datetime
+import json
 
+# Make sure these imports exist in your project:
+# import get_gandalf_token
+
+
+def getUltraPlusNP():
+    url = 'https://gandalf.gammawizard.com/rapi/GetUltraPureConstantStable'
+    token_path = '/Users/jim/PycharmProjects/Schwab-API-Python/myTrading/gandalf_token.txt'
+    csv_path = '/Users/jim/PycharmProjects/Schwab-API-Python/myTrading/UltraPlusNP.csv'
+
+    # Read bearer token
+    with open(token_path, 'r') as f:
+        bearer = f.read().strip()
     headers = {'Authorization': bearer}
-    #print(headers)
+
+    # Attempt the request with up to 3 retries
     retries = 3
     tries = 0
-
     while True:
         try:
-            UltraPlusNP = requests.get(url, headers=headers)
-            #print(UltraPlusNP.json())
-            # if this point is reached everything worked fine, so exit loop
-            break
-        except:
-            print("Try number: ", tries)
-            tries = tries + 1
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()  # Raises HTTPError if status != 200
+            break  # If we got here, the GET worked; exit the retry loop
+        except requests.RequestException as e:
+            print(f"Try number {tries}: Request failed -> {e}")
+            tries += 1
             if tries >= retries:
-                print("Maximum retries hit")
-                #cmd = '/Users/jim/getGandalf'
-                #os.system(cmd)
+                print("Maximum retries hit. Attempting to refresh token and then stopping.")
+                # Refresh the token:
                 get_gandalf_token.login()
                 get_gandalf_token.get_token()
                 get_gandalf_token.driver.close()
-                exit()
+                return  # or `exit()` if you want to fully stop
 
-            time.sleep(5)
+            time.sleep(5)  # Wait before next retry
 
+    # Now parse the JSON
     try:
-        z = UltraPlusNP.json()[0]
-        #print(z)
+        data = response.json()
+    except json.JSONDecodeError:
+        print("Exception parsing UltraPlusNP: Invalid JSON response.")
+        return  # or `exit()` if you want to stop entirely
 
-        now = datetime.now()
-        df = pd.DataFrame()
-        d = (now.strftime("%Y-%m-%d %H:%M:%S"))
+    # Ensure the data is a list with at least one element
+    if not isinstance(data, list) or len(data) == 0:
+        print("No data returned or the response is not a list.")
+        return
+
+    # Grab the first element (dict) in the list
+    z = data[0]
+    # print(z)  # Debug if needed
+
+    # Extract required fields. If any are missing, KeyError is raised.
+    try:
         tdate = z['Date']
-        print(tdate)
-
         exp = z['TDate']
-        #print(exp)
-
         putStrike = z['Limit']
-        #print(putStrike)
         callStrike = z['CLimit']
-        #print(callStrike)
-
         putSpreadPrice = z['Put']
-        #print(putSpreadPrice)
         callSpreadPrice = z['Call']
-        #print(callSpreadPrice)
-
         leftGo = z['LeftGo']
         rightGo = z['RightGo']
+    except KeyError as e:
+        print(f"Missing key in UltraPlusNP response: {e}")
+        print("Full object:", z)
+        return
 
-        #print(leftGo)
-        #print(rightGo)
+    # Print or log the date as confirmation
+    print("UltraPlusNP Date:", tdate)
 
-        df = pd.DataFrame({'date': [tdate],
-                           'exp': [exp],
-                           'putStrike': [putStrike],
-                           'callStrike': [callStrike],
-                           'putSpreadPrice': [putSpreadPrice],
-                           'callSpreadPrice': [callSpreadPrice],
-                           'leftGo': [leftGo],
-                           'rightGo': [rightGo]
-                           })
+    # Build a DataFrame and save to CSV
+    now = datetime.now()
+    df = pd.DataFrame({
+        'date': [tdate],
+        'exp': [exp],
+        'putStrike': [putStrike],
+        'callStrike': [callStrike],
+        'putSpreadPrice': [putSpreadPrice],
+        'callSpreadPrice': [callSpreadPrice],
+        'leftGo': [leftGo],
+        'rightGo': [rightGo]
+    })
 
-        #print(df)
-
-        df.to_csv('/Users/jim/PycharmProjects/Schwab-API-Python/myTrading/UltraPlusNP.csv', index=False)
-
-    #    cmd = '/usr/local/mysql/bin/mysql -h localhost -u root -p --password=Xcal1ber < /Users/jim/NAS10.sql'
-    #    os.system(cmd)
-
-    except:
-        print("Exception parsing UltraPlusNP")
-        exit()
+    df.to_csv(csv_path, index=False)
+    print(f"Data successfully saved to {csv_path}")
 
 

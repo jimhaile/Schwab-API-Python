@@ -1,152 +1,311 @@
-from dotenv import load_dotenv
-
-from schwabdev import api, Client
 import os
+import logging
+import time
+from dotenv import load_dotenv
+from schwabdev import api, Client
 import myStuff
-from datetime import datetime, timedelta
-from time import sleep
-import json
-import numpy as np
-longComboQty = 7
-longCondorQty = 16
-shortComboQty = 10
 
-shortCondorQty = 8
-shortCondorMQty = 15
+# Setup basic logging (to console at INFO level)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%H:%M:%S'
+)
 
+# Order quantity constants
+LONG_COMBO_QTY = 6
+LONG_CONDOR_QTY = 15
+SHORT_COMBO_QTY = 16
+SHORT_CONDOR_QTY = 14
+SHORT_CONDOR_M_QTY = 14
 
-
-
-accts = [
-    {
-        "nickName": "PM",
-        "accountNumber": "24212118",
-        "hashValue": "FE7045AD8FA2BACB58DF515FE403C99E6CD842014966215E65062D783EBBA2F4"
-    },
-    {
-        "nickName": "IRA",
-        "accountNumber": "39452254",
-        "hashValue": "A1A6FA4FFD9279DDBCEB82BB7CD98C3AE6A50C8E672628C8D64A40ABD9D1B06D"
-    }
-]
+# Initial bid/offer adjustment value
+BUMP = 0.0
 
 
-def get_hash_value(accts, nickname):
-    for acct in accts:
-        if acct["nickName"] == nickname:
-            return acct["hashValue"]
-    return None
-def load_client_data():
-    client = Client(os.getenv('app_key'), os.getenv('app_secret'), os.getenv('callback_url'))
-    client.update_tokens_auto()  # update tokens automatically (except refresh token)
-    linked_accounts = client.account_linked().json()
-    account_hash = linked_accounts[0].get('hashValue')
-    return client, account_hash
-
-def fetch_and_print_quotes(client, symList):
-    myquote = client.quotes(symList).json()
-    mark_dict = {symbol: myquote[symbol]['quote']['mark'] for symbol in symList}
-    putSpreadPrice = abs(myStuff.round_to_nearest_nickel(mark_dict.get(symList[0]) - mark_dict.get(symList[1])))
-    callSpreadPrice = abs(myStuff.round_to_nearest_nickel(mark_dict.get(symList[2]) - mark_dict.get(symList[3])))
-    #putSpreadPrice = abs(round(mark_dict.get(symList[0]) - mark_dict.get(symList[1]), 2))
-    #callSpreadPrice = abs(round(mark_dict.get(symList[2]) - mark_dict.get(symList[3]), 2))
-    print("Put Spread ", putSpreadPrice)
-    print("Call Spread ", callSpreadPrice)
-    return putSpreadPrice, callSpreadPrice
 def sign(x):
-    if x > 0:
-        return 1
-    elif x < 0:
-        return -1
+    """Returns 1 if x > 0, -1 if x < 0, else 0."""
+    return 1 if x > 0 else -1 if x < 0 else 0
+
+
+def get_debit_credit_for_combo(spread_price):
+    """
+    Determine the debit/credit flag for combo orders.
+    If spread_price is less than or equal to 0, it's NET_CREDIT; otherwise, NET_DEBIT.
+    """
+    return 'NET_CREDIT' if spread_price <= 0 else 'NET_DEBIT'
+
+
+def place_order_for_all_accounts(client, account_hashes, order_type, order_params):
+    """
+    Create an order (condor or combo) using myStuff functions,
+    then place that order for each account in 'account_hashes'.
+
+    :param client: Schwab API client
+    :param account_hashes: list of account hash strings
+    :param order_type: 'condor' or 'combo'
+    :param order_params: dict with required params:
+        - For condor: debitCredit, symList, qty, spreadPrice
+        - For combo:  debitCredit, goValue, symList, qty, spreadPrice
+    :return: list of dicts with 'acct_hash', 'resp', 'order_id', 'details' for each successful placement
+    """
+    # Create the order using the appropriate function
+    if order_type == 'condor':
+        order = myStuff.createCondorOrder(
+            order_params['debitCredit'],
+            order_params['symList'],
+            order_params['qty'],
+            order_params['spreadPrice']
+        )
+    elif order_type == 'combo':
+        order = myStuff.createComboOrder(
+            order_params['debitCredit'],
+            order_params['goValue'],
+            order_params['symList'],
+            order_params['qty'],
+            order_params['spreadPrice']
+        )
     else:
-        return 0
-def main():
-    # exit()
-    print(datetime.now().strftime('%H:%M:%S'))
-    load_dotenv()  # load environment variables from .env file
-    client, account_hash = load_client_data()
-    #myStuff.getUltraPlusNP()
-    goList, strikeList, symList, priceList, days = myStuff.read_unpp_file()
-    print(goList, strikeList, symList, priceList, days)
+        logging.error(f"Unknown order_type: {order_type}. No orders placed.")
+        return []
 
-    putSpreadPrice, callSpreadPrice = fetch_and_print_quotes(client, symList)
-    resp = None
+    logging.info(f"Placing {order_type.upper()} order for each account: {order_params}")
 
-# condors
-    if (sign(goList[0]) == sign(goList[1])):
-        if goList[0] < 0:
-            debitCredit = "NET_CREDIT"
-            spreadPrice = round(putSpreadPrice + callSpreadPrice - 0.05,2)
-            if days > 2:
-                qty = shortCondorMQty
-            else:
-                qty = shortCondorQty
-        else:
-            debitCredit = "NET_DEBIT"
-            spreadPrice = round(putSpreadPrice + callSpreadPrice + 0.05,2)
-            qty = longCondorQty
+    results = []
+    for acct_hash in account_hashes:
+        try:
+            resp = client.order_place(acct_hash, order)
+            if resp.status_code >= 400:
+                logging.error(f"Account {acct_hash} order failed with status code {resp.status_code}")
+                logging.error(f"Response: {resp.text}")
+                continue
 
-        condorOrder = myStuff.createCondorOrder(debitCredit, symList, qty, spreadPrice)
-        print(datetime.now().strftime('%H:%M:%S'))
-        print("Placing Condor Order")
-        resp = client.order_place(account_hash, condorOrder)
-        print(f"Condor order response: {resp}")
-        condorOrderID = resp.headers.get('location', '/').split('/')[-1]
-        print(f"CondorOrderID: {condorOrderID}")
-        print(datetime.now().strftime('%H:%M:%S'))
+            # Extract order_id from the location header
+            order_id = resp.headers.get('location', '/').split('/')[-1]
 
+            # Retrieve order details
+            details_resp = client.order_details(acct_hash, order_id)
+            details = details_resp.json() if details_resp.status_code == 200 else {
+                "error": "Unable to fetch order details."}
+
+            results.append({
+                'acct_hash': acct_hash,
+                'resp': resp,
+                'order_id': order_id,
+                'details': details
+            })
+
+            logging.info(f"Order placed for {acct_hash}. Order ID: {order_id}")
+        except Exception as e:
+            logging.error(f"Error placing order for account {acct_hash}: {e}", exc_info=True)
+            continue
+
+    return results
+
+
+def load_client_data():
+    """
+    Connect to Schwab, fetch linked accounts, and return
+    up to 4 account_hash values in a list.
+    """
+    client = Client(os.getenv('app_key'), os.getenv('app_secret'), os.getenv('callback_url'))
+    client.update_tokens_auto()  # Refresh tokens automatically
+
+    linked_accounts = client.account_linked().json()
+    logging.info(f"Linked Accounts: {linked_accounts}")
+
+    account_hashes = [
+        acct['hashValue'] for i, acct in enumerate(linked_accounts) if i < 4 and 'hashValue' in acct
+    ]
+
+    if not account_hashes:
+        logging.error("No linked accounts found! Exiting.")
         exit()
-#combos
-    if goList[0] < 0:
-        print("This is a long combo")
-        #print("Temporarily not trading combos")
-        #exit()
-        spreadPrice = myStuff.round_to_nearest_nickel(putSpreadPrice - callSpreadPrice )
-        if spreadPrice > -1.0: #changed this from 0.0
-            comboOrder = myStuff.createComboOrder("NET_CREDIT", goList[0], symList, longComboQty, spreadPrice)
-            print(datetime.now().strftime('%H:%M:%S'))
-            print("Placing Long Combo Order")
-            resp = client.order_place(account_hash, comboOrder)
-        else:
-            print("Long Combo not a credit. No trade.")
-            exit()
 
+    logging.info(f"Using these account hashes: {account_hashes}")
+    return client, account_hashes
+
+
+def fetch_and_print_quotes(client, sym_list):
+    """
+    Fetch quotes for the symbols in sym_list, compute putSpreadPrice and callSpreadPrice,
+    and log them.
+    """
+    quotes = client.quotes(sym_list).json()
+    mark_dict = {}
+
+    for symbol in sym_list:
+        try:
+            mark_dict[symbol] = quotes[symbol]['quote']['mark']
+        except KeyError:
+            logging.error(f"Missing quote data for {symbol}.")
+            mark_dict[symbol] = 0.0
+
+    put_spread_price = abs(myStuff.round_to_nearest_nickel(mark_dict.get(sym_list[0]) - mark_dict.get(sym_list[1])))
+    call_spread_price = abs(myStuff.round_to_nearest_nickel(mark_dict.get(sym_list[2]) - mark_dict.get(sym_list[3])))
+
+    logging.info(f"Put Spread: {put_spread_price}")
+    logging.info(f"Call Spread: {call_spread_price}")
+    return put_spread_price, call_spread_price
+
+
+def main():
+    logging.info("***** Script start *****")
+    load_dotenv()
+
+    # 1) Initialize client & accounts
+    client, account_hashes = load_client_data()
+
+    # 2) Read data from file
+    go_list, strike_list, sym_list, price_list, days = myStuff.read_unpp_file()
+    logging.info(
+        f"Read from unpp file:\n  go_list={go_list}\n  strike_list={strike_list}\n  sym_list={sym_list}\n"
+        f"  price_list={price_list}\n  days={days}"
+    )
+
+    if len(sym_list) < 4:
+        logging.error("sym_list must have at least 4 symbols for the spreads. Exiting.")
+        return
+
+    # 3) Fetch quote prices
+    put_spread_price, call_spread_price = fetch_and_print_quotes(client, sym_list)
+
+    # 4) Decide order type (condor or combo) based on go_list signs
+    if sign(go_list[0]) == sign(go_list[1]):
+        # Condor order
+        order_type = 'condor'
+        if go_list[0] < 0:
+            # Short condor
+            debit_credit = "NET_CREDIT"
+            spread_price = round(put_spread_price + call_spread_price - BUMP, 2)
+            qty = SHORT_CONDOR_M_QTY if days > 2 else SHORT_CONDOR_QTY
+        else:
+            # Long condor
+            debit_credit = "NET_DEBIT"
+            spread_price = round(put_spread_price + call_spread_price + BUMP, 2)
+            qty = LONG_CONDOR_QTY
+
+        order_params = {
+            'debitCredit': debit_credit,
+            'symList': sym_list,
+            'qty': qty,
+            'spreadPrice': spread_price
+        }
     else:
-        print("This is a short combo")
-        #print("Temporarily not trading combos")
-        #exit()
-        spreadPrice = myStuff.round_to_nearest_nickel(callSpreadPrice - putSpreadPrice )
-        if spreadPrice > -1.0:   #changed this from 0
-            comboOrder = myStuff.createComboOrder("NET_CREDIT", goList[0], symList, shortComboQty, spreadPrice)
-            print(datetime.now().strftime('%H:%M:%S'))
-            print("Placing Short Combo Order")
-            resp = client.order_place(account_hash, comboOrder)
+        # Combo order
+        order_type = 'combo'
+        if go_list[0] < 0:
+            # Long combo
+            spread_price = myStuff.round_to_nearest_nickel(call_spread_price - put_spread_price)
+            if spread_price <= -1.0:
+                logging.warning("Long Combo not a credit. No trade.")
+                return
+            debit_credit = get_debit_credit_for_combo(spread_price)
+            order_params = {
+                'debitCredit': debit_credit,
+                'goValue': go_list[0],
+                'symList': sym_list,
+                'qty': LONG_COMBO_QTY,
+                'spreadPrice': spread_price
+            }
         else:
-            print("Short Combo not a credit. No trade.")
-            exit()
+            # Short combo
+            spread_price = myStuff.round_to_nearest_nickel(put_spread_price - call_spread_price)
+            if spread_price <= -1.0:
+                logging.warning("Short Combo not a credit. No trade.")
+                return
+            debit_credit = get_debit_credit_for_combo(spread_price)
+            order_params = {
+                'debitCredit': debit_credit,
+                'goValue': go_list[0],
+                'symList': sym_list,
+                'qty': SHORT_COMBO_QTY,
+                'spreadPrice': spread_price
+            }
 
-    order_id = resp.headers.get('location', '/').split('/')[-1]
-    print(f"Order id: {order_id}")
-    print(datetime.now().strftime('%H:%M:%S'))
+    # 5) Place order for all accounts
+    results = place_order_for_all_accounts(client, account_hashes, order_type, order_params)
+    logging.info(f"Order placement results: {results}")
 
-    # get specific order details
-    print("|\n|client.order_details(account_hash, order_id).json()", end="\n|")
-    print(client.order_details(account_hash, order_id).json())
-    #sleep(10)
-    #client.order_cancel(account_hash, order_id)
-    #order_replace(self, account_hash, order_id, order)
+    # 6) Wait 30 seconds, then update bump, recalc spreadPrice, modify & replace the order
+    logging.info("Waiting 30 seconds before order replacement...")
+    time.sleep(30)
 
+    updated_bump = 0.05
+    for res in results:
+        acct_hash = res['acct_hash']
+        order_id = res['order_id']
 
+        # Recalculate new spreadPrice based on order type and updated bump
+        if order_type == 'condor':
+            if go_list[0] < 0:
+                new_spread_price = round(put_spread_price + call_spread_price - updated_bump, 2)
+            else:
+                new_spread_price = round(put_spread_price + call_spread_price + updated_bump, 2)
+            new_order = myStuff.createCondorOrder(order_params['debitCredit'], sym_list, order_params['qty'],
+                                                  new_spread_price)
+        elif order_type == 'combo':
+            if go_list[0] < 0:
+                new_spread_price = myStuff.round_to_nearest_nickel(
+                    (call_spread_price - put_spread_price) + updated_bump)
+            else:
+                new_spread_price = myStuff.round_to_nearest_nickel(
+                    (put_spread_price - call_spread_price) + updated_bump)
+            new_dc = get_debit_credit_for_combo(new_spread_price)
+            new_order = myStuff.createComboOrder(new_dc, go_list[0], sym_list, order_params['qty'], new_spread_price)
 
+        try:
+            replace_resp = client.order_replace(acct_hash, order_id, new_order)
+            if replace_resp.status_code >= 400:
+                logging.error(
+                    f"Order replacement for account {acct_hash} failed with status code {replace_resp.status_code}")
+            else:
+                logging.info(f"Order replaced for account {acct_hash} with new spread price: {new_spread_price}")
+        except Exception as e:
+            logging.error(f"Error replacing order for account {acct_hash}: {e}", exc_info=True)
+            continue
 
+    logging.info("***** Script end *****")
+
+# 7) Wait 30 more seconds, then update bump, recalc spreadPrice, modify & replace the order
+    logging.info("Waiting 30 seconds before order replacement...")
+    time.sleep(30)
+
+    updated_bump = 0.10
+    for res in results:
+        acct_hash = res['acct_hash']
+        order_id = res['order_id']
+
+        # Recalculate new spreadPrice based on order type and updated bump
+        if order_type == 'condor':
+            if go_list[0] < 0:
+                new_spread_price = round(put_spread_price + call_spread_price - updated_bump, 2)
+            else:
+                new_spread_price = round(put_spread_price + call_spread_price + updated_bump, 2)
+            new_order = myStuff.createCondorOrder(order_params['debitCredit'], sym_list, order_params['qty'],
+                                                  new_spread_price)
+        elif order_type == 'combo':
+            if go_list[0] < 0:
+                new_spread_price = myStuff.round_to_nearest_nickel(
+                    (call_spread_price - put_spread_price) + updated_bump)
+            else:
+                new_spread_price = myStuff.round_to_nearest_nickel(
+                    (put_spread_price - call_spread_price) + updated_bump)
+            new_dc = get_debit_credit_for_combo(new_spread_price)
+            new_order = myStuff.createComboOrder(new_dc, go_list[0], sym_list, order_params['qty'], new_spread_price)
+
+        try:
+            replace_resp = client.order_replace(acct_hash, order_id, new_order)
+            if replace_resp.status_code >= 400:
+                logging.error(
+                    f"Order replacement for account {acct_hash} failed with status code {replace_resp.status_code}")
+            else:
+                logging.info(f"Order replaced for account {acct_hash} with new spread price: {new_spread_price}")
+        except Exception as e:
+            logging.error(f"Error replacing order for account {acct_hash}: {e}", exc_info=True)
+            continue
+
+    logging.info("***** Script end *****")
 
 if __name__ == '__main__':
-    print("Welcome to the unofficial Schwab api interface!\nGithub: https://github.com/tylerebowers/Schwab-API-Python")
-    #api.initialize()  # checks tokens & loads variables
-    #api.updateTokensAutomatic()  # starts thread to update tokens automatically
-    load_dotenv()
-    client = Client(os.getenv('app_key'), os.getenv('app_secret'), os.getenv('callback_url'))
-    client.update_tokens_auto()  # update tokens automatically (except refresh token)
-    # stream.startManual()  # start the stream manually
-    #    api._RefreshTokenUpdate()
-    main()  # call the user code above
+    main()
