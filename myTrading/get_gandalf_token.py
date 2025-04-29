@@ -3,6 +3,7 @@ import requests
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
+from dotenv import load_dotenv
 
 import selenium
 from selenium.common.exceptions import TimeoutException
@@ -11,16 +12,16 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait as wait
 from selenium.webdriver.common.by import By
 from time import sleep
-
+import os
 URL = "https://gandalf.gammawizard.com/var2/"
 
-
-
+load_dotenv()
+USERNAME = os.getenv('USERNAME')
+PASSWORD = os.getenv('PASSWORD')
 LOGIN_USERNAME_FIELD = '/html/body/app-root/app-bouncer/app-login/mat-card/mat-card-content/form/p[1]/mat-form-field/div/div[1]/div/input'
 LOGIN_PASSWORD_FIELD = '/html/body/app-root/app-bouncer/app-login/mat-card/mat-card-content/form/p[2]/mat-form-field/div/div[1]/div/input'
 LOGIN_BUTTON = '/html/body/app-root/app-bouncer/app-login/mat-card/mat-card-content/form/p[3]/button'
-USERNAME = xxxxxxxx
-PASSWORD = xxxxxxxx
+
 
 options = Options()
 options.add_argument('headless')
